@@ -171,8 +171,12 @@
 
     <script>
         const defaultActivities = [
-            { icon: '▶️', label: 'YT' }, { icon: '🍳', label: 'MF' }, { icon: '🧩', label: 'SD' },
-            { icon: '🔬', label: 'DD' }, { icon: '🏆', label: 'COMPETITION' }, { icon: '🎯', label: 'T2A' }
+            { icon: '📺', label: 'YOUTUBE' },
+            { icon: '📸', label: 'INSTAGRAM' },
+            { icon: '💼', label: 'LINKEDIN' },
+            { icon: '📰', label: 'SUBSTACK' },
+            { icon: '📸', label: 'INSTAGRAM' },
+            { icon: '📺', label: 'YOUTUBE' }
         ];
 
         function getStoredArray(key, fallback) {
@@ -214,22 +218,78 @@
             return Math.floor(Math.random() * max);
         }
 
+        function getFaceQuotaMap() {
+            const quotaMap = new Map();
+            if (!Array.isArray(activities)) {
+                return quotaMap;
+            }
+
+            activities.forEach(activity => {
+                const faceName = getFaceName(activity);
+                if (!faceName) return;
+                quotaMap.set(faceName, (quotaMap.get(faceName) || 0) + 1);
+            });
+
+            return quotaMap;
+        }
+
+        function getHistoryCountMap(historyEntries) {
+            const countMap = new Map();
+            historyEntries.forEach(item => {
+                const faceName = getFaceName(item);
+                if (!faceName) return;
+                countMap.set(faceName, (countMap.get(faceName) || 0) + 1);
+            });
+            return countMap;
+        }
+
         function pickNextActivity() {
             if (!Array.isArray(activities) || activities.length === 0) {
                 return defaultActivities[0];
             }
 
-            const previousResult = history[0];
-            const previousName = previousResult ? getFaceName(previousResult) : '';
+            const historyEntries = normalizeHistory(history);
+            const quotaMap = getFaceQuotaMap();
+            const historyCountMap = getHistoryCountMap(historyEntries);
+            const uniqueFaceNames = Array.from(quotaMap.keys());
+            const hasSeenAllUniqueFaces = uniqueFaceNames.every(faceName => (historyCountMap.get(faceName) || 0) >= 1);
 
-            if (previousName) {
-                const availableActivities = activities.filter(activity => getFaceName(activity) !== previousName);
-                if (availableActivities.length > 0) {
-                    return availableActivities[getRandomIndex(availableActivities.length)];
+            const eligibleActivities = activities.filter(activity => {
+                const faceName = getFaceName(activity);
+                if (!faceName) return false;
+                const quota = quotaMap.get(faceName) || 0;
+                const usedCount = historyCountMap.get(faceName) || 0;
+
+                if (!hasSeenAllUniqueFaces) {
+                    return usedCount < 1;
                 }
+
+                return usedCount < quota;
+            });
+
+            if (eligibleActivities.length > 0) {
+                return eligibleActivities[getRandomIndex(eligibleActivities.length)];
             }
 
             return activities[getRandomIndex(activities.length)];
+        }
+
+        function hasRunCycleCompleted() {
+            const historyEntries = normalizeHistory(history);
+            const quotaMap = getFaceQuotaMap();
+            const historyCountMap = getHistoryCountMap(historyEntries);
+
+            if (quotaMap.size === 0) {
+                return false;
+            }
+
+            return Array.from(quotaMap.entries()).every(([faceName, quota]) => (historyCountMap.get(faceName) || 0) >= quota);
+        }
+
+        function resetHistory() {
+            history = [];
+            localStorage.removeItem('diceHistory');
+            renderHistory();
         }
 
         let activities = normalizeActivities(getStoredArray('diceActivities', defaultActivities));
@@ -295,6 +355,14 @@
         }
 
         function roll() {
+            if (hasRunCycleCompleted()) {
+                const shouldReset = confirm("All faces have been used once in this run. Clear history to start a fresh cycle?");
+                if (!shouldReset) {
+                    return;
+                }
+                resetHistory();
+            }
+
             btn.disabled = true;
             box.classList.add('rolling');
             
@@ -354,9 +422,7 @@
 
         function clearHistory() {
             if (confirm("Are you sure you want to delete all saved rolls?")) {
-                history = [];
-                localStorage.removeItem('diceHistory');
-                renderHistory();
+                resetHistory();
             }
         }
 
