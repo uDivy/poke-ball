@@ -170,17 +170,73 @@
     </div>
 
     <script>
-        let activities = [
+        const defaultActivities = [
             { icon: '▶️', label: 'YT' }, { icon: '🍳', label: 'MF' }, { icon: '🧩', label: 'SD' },
             { icon: '🔬', label: 'DD' }, { icon: '🏆', label: 'COMPETITION' }, { icon: '🎯', label: 'T2A' }
         ];
-        let tzOffset = -(new Date().getTimezoneOffset() / 60);
-        let history = [];
 
-        // LOAD SAVED STATE
-        if (localStorage.getItem('diceActivities')) activities = JSON.parse(localStorage.getItem('diceActivities'));
-        if (localStorage.getItem('diceTZ')) tzOffset = parseFloat(localStorage.getItem('diceTZ'));
-        if (localStorage.getItem('diceHistory')) history = JSON.parse(localStorage.getItem('diceHistory'));
+        function getStoredArray(key, fallback) {
+            try {
+                const rawValue = localStorage.getItem(key);
+                if (rawValue === null || rawValue === '') return fallback;
+                const parsedValue = JSON.parse(rawValue);
+                return Array.isArray(parsedValue) ? parsedValue : fallback;
+            } catch (error) {
+                console.warn(`Unable to load ${key} from storage`, error);
+                return fallback;
+            }
+        }
+
+        function normalizeActivities(input) {
+            if (!Array.isArray(input) || input.length === 0) {
+                return defaultActivities.map(activity => ({ ...activity }));
+            }
+
+            const validActivities = input.filter(activity => activity && typeof activity === 'object' && typeof activity.icon === 'string' && typeof activity.label === 'string');
+            return validActivities.length > 0 ? validActivities : defaultActivities.map(activity => ({ ...activity }));
+        }
+
+        function normalizeHistory(input) {
+            if (!Array.isArray(input)) return [];
+            return input.filter(item => item && typeof item === 'object' && typeof item.icon === 'string' && typeof item.label === 'string' && typeof item.date === 'string' && typeof item.time === 'string');
+        }
+
+        function getFaceName(face) {
+            return (face?.label || face?.icon || '').toString().trim();
+        }
+
+        function getRandomIndex(max) {
+            if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.getRandomValues === 'function') {
+                const cryptoArray = new Uint32Array(1);
+                window.crypto.getRandomValues(cryptoArray);
+                return cryptoArray[0] % max;
+            }
+            return Math.floor(Math.random() * max);
+        }
+
+        function pickNextActivity() {
+            if (!Array.isArray(activities) || activities.length === 0) {
+                return defaultActivities[0];
+            }
+
+            const previousResult = history[0];
+            const previousName = previousResult ? getFaceName(previousResult) : '';
+
+            if (previousName) {
+                const availableActivities = activities.filter(activity => getFaceName(activity) !== previousName);
+                if (availableActivities.length > 0) {
+                    return availableActivities[getRandomIndex(availableActivities.length)];
+                }
+            }
+
+            return activities[getRandomIndex(activities.length)];
+        }
+
+        let activities = normalizeActivities(getStoredArray('diceActivities', defaultActivities));
+        let tzOffset = -(new Date().getTimezoneOffset() / 60);
+        let history = normalizeHistory(getStoredArray('diceHistory', []));
+        const storedTZ = parseFloat(localStorage.getItem('diceTZ'));
+        if (Number.isFinite(storedTZ)) tzOffset = storedTZ;
 
         const iconDisplay = document.getElementById('current-icon');
         const labelDisplay = document.getElementById('current-label');
@@ -243,16 +299,20 @@
             box.classList.add('rolling');
             
             const shuffleTimer = setInterval(() => {
-                const temp = activities[Math.floor(Math.random() * activities.length)];
-                iconDisplay.textContent = temp.icon;
+                const temp = pickNextActivity();
+                iconDisplay.textContent = temp?.icon || '🎲';
                 labelDisplay.textContent = "ROLLING...";
             }, 60);
 
             setTimeout(() => {
                 clearInterval(shuffleTimer);
-                const cryptoArray = new Uint32Array(1);
-                window.crypto.getRandomValues(cryptoArray);
-                const result = activities[cryptoArray[0] % activities.length];
+                const result = pickNextActivity();
+
+                if (!result) {
+                    box.classList.remove('rolling');
+                    btn.disabled = false;
+                    return;
+                }
 
                 iconDisplay.textContent = result.icon;
                 labelDisplay.textContent = result.label;
@@ -263,9 +323,7 @@
                 
                 // SAVE TO HISTORY ARRAY
                 const rollData = { icon: result.icon, label: result.label, date: ts.date, time: ts.time };
-                history.unshift(rollData);
-                if (history.length > 100) history.pop(); // Keep last 100 rolls
-                
+                history = [rollData, ...normalizeHistory(history)].slice(0, 100);
                 localStorage.setItem('diceHistory', JSON.stringify(history));
                 renderHistory();
                 
@@ -274,6 +332,7 @@
         }
 
         function renderHistory() {
+            history = normalizeHistory(history);
             historyList.innerHTML = '';
             history.forEach(item => {
                 const div = document.createElement('div');
